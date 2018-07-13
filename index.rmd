@@ -1,0 +1,145 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Alia Eccles"
+date: "July 10, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment Summary
+
+In this analysis, I attempt to predict how well participants performed an exercise leveraging the weight lifting exercise data set provided. After cleaning the data and partitioning it for cross-validation purposes, I applied a random forest model due to its typically high accuracy levels. Then, I examined its in-sample and out-of-sample error. Finally, I applied my model to the testing data set. 
+
+##Data Cleaning
+
+First, I subsetted my data into a training and test set, for cross-validation purposes. 
+
+```{r subset, echo=FALSE}
+setwd("C:/Users/aeccles/Documents/Acumen/Data Science Texts/Coursera Data Science Assignments/Practical Machine Learning")
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+library(caret)
+
+```
+
+The original data was quite messy, so I dropped down to the original sensor data to see if this would allow for sufficient analysis. I applied the same transformations to the test set, to make sure the model would work in the desired context. 
+
+```{r original}
+set.seed(32323)
+inTrain <- createDataPartition(y = training$classe, p=0.75,list= FALSE)
+train.train <- training[inTrain,]
+train.test <- training[inTrain,]
+
+#there are a lot of calculated fields with errors. Let's drop down to the original sensor data 
+#and see if we can get a good model from that
+train.clean <- train.train[, -grep("^min", colnames(train.train))]
+train.clean <- train.clean[, -grep("^max", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^avg", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^var", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^kurtosis", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^stddev", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^amplitude", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^skewness", colnames(train.clean))]
+train.clean <- train.clean[, -grep("^total", colnames(train.clean))]
+train.clean <- train.clean[!(train.clean$new_window == "yes"),]
+train.clean <- subset(train.clean, select = -c(new_window))
+train.clean <- train.clean[-c(1:6)]
+
+#same with training test partition
+
+train.test.clean <- train.test[, -grep("^min", colnames(train.test))]
+train.test.clean <- train.test.clean[, -grep("^max", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^avg", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^var", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^kurtosis", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^stddev", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^amplitude", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^skewness", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[, -grep("^total", colnames(train.test.clean))]
+train.test.clean <- train.test.clean[!(train.test.clean$new_window == "yes"),]
+train.test.clean <- subset(train.test.clean, select = -c(new_window))
+train.test.clean <- train.test.clean[-c(1:6)]
+
+#same with test set
+test.clean <- testing[, -grep("^min", colnames(testing))]
+test.clean <- test.clean[, -grep("^max", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^avg", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^var", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^kurtosis", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^stddev", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^amplitude", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^skewness", colnames(test.clean))]
+test.clean <- test.clean[, -grep("^total", colnames(test.clean))]
+test.clean <- test.clean[!(test.clean$new_window == "yes"),]
+test.clean <- subset(test.clean, select = -c(new_window))
+test.clean <- test.clean[-c(1:6)]
+
+```
+
+
+#Model Building, Cross Validation, and Out of Sample Error
+
+Due to the required level of accuracy (>99% required to do well on the quiz), I started with a basic r partition to see if there was a good baseline for using a random forest, as random forest accuracy tends to be quite high. 
+
+```{r rpart}
+#take advantage of multiple cores --> run parallel processing below
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 2) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+#here is the actual model
+modfit.rpart <- train(classe~., method = "rpart", data = train.clean, trControl = fitControl)
+stopCluster(cluster)  #do this each time
+registerDoSEQ() #do this each time
+
+modfit.rpart 
+modfit.rpart$resample 
+confusionMatrix.train(modfit.rpart) 
+```
+
+You can see that the model accuracy is only 0.53. Indeed, in several of the resamples, it drops to 0.48. Not nearly good enough for this project, but this is only a single tree. Let's attempt the same thing, but with multiple trees. 
+
+```{r rf}
+#take advantage of multiple cores --> run parallel processing below
+ library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 2) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+#here is the actual random forest model
+modfit.rf <- train(classe ~., data = train.clean, method = "rf", prox = TRUE, trControl = fitControl) 
+
+stopCluster(cluster)  #do this each time
+registerDoSEQ() #do this each time
+
+modfit.rf
+modfit.rf$resample
+confusionMatrix.train(modfit.rf)
+```
+
+Overall model accuracy is 0.9909, meaning that there is a 83% chance of correctly predicting all 20 test cases. Likewise, k-fold cross-validation showed 98-99% accuracy in all cases, and the confusion matrix shows strong in-sample predition. 
+
+Random forests are prone to over-fitting, so it's important to test the model out-of-sample. 
+
+
+```{r crossvalidation}
+validation.pred <- predict(modfit.rf, train.test.clean)
+train.test.clean$predRight <- validation.pred == train.test.clean$classe 
+table(validation.pred,train.test.clean$classe)
+```
+
+And, based on the table, it appears that the model is not over-fitted. Finally, let's run it against the test data to acquire our answers. With a quiz score of 20/20, the model appears to function well. 
+
+```{r prediction}
+pred <- predict(modfit.rf, test.clean)
+```
